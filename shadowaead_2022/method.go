@@ -49,12 +49,17 @@ type Method struct {
 	udpBlockDecryptCipher cipher.Block
 	pskList               [][]byte
 	pskHash               []byte
+	tolerance             int
 }
 
 func NewMethod(ctx context.Context, methodName string, options C.MethodOptions) (C.Method, error) {
 	m := &Method{
-		timeFunc: ntp.TimeFuncFromContext(ctx),
-		pskList:  options.KeyList,
+		timeFunc:  ntp.TimeFuncFromContext(ctx),
+		pskList:   options.KeyList,
+		tolerance: options.Tolerance,
+	}
+	if m.tolerance <= 0 {
+		m.tolerance = 30
 	}
 	if options.Password != "" {
 		var pskList [][]byte
@@ -131,6 +136,7 @@ func (m *Method) DialConn(conn net.Conn, destination M.Socksaddr) (net.Conn, err
 		Conn:        conn,
 		method:      m,
 		destination: destination,
+		tolerance:   m.tolerance,
 	}
 	return shadowsocksConn, shadowsocksConn.writeRequest(nil)
 }
@@ -140,6 +146,7 @@ func (m *Method) DialEarlyConn(conn net.Conn, destination M.Socksaddr) net.Conn 
 		Conn:        conn,
 		method:      m,
 		destination: destination,
+		tolerance:   m.tolerance,
 	}
 }
 
@@ -150,6 +157,7 @@ func (m *Method) DialPacketConn(conn net.Conn) N.NetPacketConn {
 		writer:       bufio.NewExtendedWriter(conn),
 		method:       m,
 		session:      m.newUDPSession(),
+		tolerance:    m.tolerance,
 	}
 }
 
@@ -169,6 +177,7 @@ type clientConn struct {
 	reader          *shadowio.Reader
 	readWaitOptions N.ReadWaitOptions
 	writer          *shadowio.Writer
+	tolerance       int
 	shadowio.WriterInterface
 }
 
@@ -290,7 +299,7 @@ func (c *clientConn) readResponse() error {
 	var epoch uint64
 	common.Must(binary.Read(fixedResponseBuffer, binary.BigEndian, &epoch))
 	diff := int(math.Abs(float64(c.method.time().Unix() - int64(epoch))))
-	if diff > 30 {
+	if diff > c.tolerance {
 		return E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 	}
 	responseSalt := common.Must1(fixedResponseBuffer.ReadBytes(c.method.keySaltLength))
@@ -364,10 +373,11 @@ func (c *clientConn) Close() error {
 
 type clientPacketConn struct {
 	N.AbstractConn
-	reader  N.ExtendedReader
-	writer  N.ExtendedWriter
-	method  *Method
-	session *udpSession
+	reader    N.ExtendedReader
+	writer    N.ExtendedWriter
+	method    *Method
+	session   *udpSession
+	tolerance int
 }
 
 func (m *Method) newUDPSession() *udpSession {
@@ -559,7 +569,7 @@ func (c *clientPacketConn) readPacket(buffer *buf.Buffer) (destination M.Socksad
 	}
 
 	diff := int(math.Abs(float64(c.method.time().Unix() - int64(epoch))))
-	if diff > 30 {
+	if diff > c.tolerance {
 		return M.Socksaddr{}, E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 	}
 

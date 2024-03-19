@@ -15,9 +15,10 @@ type Method interface {
 }
 
 type MethodOptions struct {
-	Password string
-	Key      []byte
-	KeyList  [][]byte
+	Tolerance int
+	Password  string
+	Key       []byte
+	KeyList   [][]byte
 }
 
 type MethodCreator func(ctx context.Context, methodName string, options MethodOptions) (Method, error)
